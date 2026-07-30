@@ -108,8 +108,9 @@ textarea.field{resize:none;line-height:1.5}
 }
 .greet{font-size:26px;font-weight:800;letter-spacing:-.03em}
 .topbar-sub{font-size:13.5px;color:var(--muted)}
+/* 44px הוא המינימום של אפל למטרת נגיעה — מתחת לזה קשה לפגוע באצבע */
 .icon-btn{
-  width:42px;height:42px;border-radius:12px;border:0;background:var(--bg-2);
+  width:44px;height:44px;border-radius:12px;border:0;background:var(--bg-2);
   color:var(--text);display:grid;place-items:center;cursor:pointer;flex-shrink:0;
 }
 .icon-btn.accent{background:var(--accent);color:#fff}
@@ -155,7 +156,7 @@ textarea.field{resize:none;line-height:1.5}
 
 .water-row{display:flex;gap:7px;flex-wrap:wrap}
 .cup{
-  width:34px;height:42px;border:2px solid var(--line);border-radius:6px 6px 12px 12px;
+  width:44px;height:52px;border:2px solid var(--line);border-radius:7px 7px 14px 14px;
   cursor:pointer;background:transparent;transition:.18s;
 }
 .cup.on{background:var(--accent);border-color:var(--accent)}
@@ -168,8 +169,12 @@ textarea.field{resize:none;line-height:1.5}
 .log-name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .log-sub{font-size:12.5px;color:var(--muted)}
 .log-cal{font-size:15px;font-weight:700;flex-shrink:0}
-.log-del{background:none;border:0;color:var(--muted);cursor:pointer;padding:4px;flex-shrink:0}
-.log-del svg{width:17px;height:17px}
+/* שטח הנגיעה 44px, אבל המרווח השלילי מונע מהשורה להתנפח */
+.log-del{
+  background:none;border:0;color:var(--muted);cursor:pointer;flex-shrink:0;
+  width:44px;height:44px;display:grid;place-items:center;margin:-8px -12px -8px 0;
+}
+.log-del svg{width:18px;height:18px}
 .empty{text-align:center;color:var(--muted);font-size:14px;padding:22px 0}
 
 /* גרפים נקראים משמאל לימין גם בעברית — הישן משמאל, החדש מימין */
