@@ -145,6 +145,7 @@ const App = (() => {
 
   function openScan() {
     const ai = AI.hasKey();
+    $('#scanTitle').textContent = 'הוסף ארוחה';
     $('#scanBody').innerHTML = `
       <p class="muted small">${ai
         ? 'צלם את האוכל ואני אחשב כמה קלוריות יש בו, או בחר מהרשימה.'
@@ -165,6 +166,7 @@ const App = (() => {
   let manualQuery = '';
 
   function openManual() {
+    $('#scanTitle').textContent = 'מה אכלת?';
     $('#scanBody').innerHTML = `
       <input class="field" id="foodSearch" type="search" placeholder="חפש מאכל..." autocomplete="off" value="${UI.esc(manualQuery)}">
       <div id="foodList" class="food-list"></div>
@@ -210,6 +212,7 @@ const App = (() => {
   }
 
   function openPortion(food) {
+    $('#scanTitle').textContent = 'כמה אכלת?';
     let qty = 1;
     $('#scanBody').innerHTML = `
       <div class="portion-head">
@@ -259,6 +262,7 @@ const App = (() => {
   }
 
   function openCustomFood() {
+    $('#scanTitle').textContent = 'הזנה חופשית';
     $('#scanBody').innerHTML = `
       <label class="lbl">מה אכלת?</label>
       <input class="field" id="cfName" type="text" placeholder="לדוגמה: עוגת יום הולדת">
