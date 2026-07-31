@@ -272,6 +272,34 @@ textarea.field{resize:none;line-height:1.5}
 .sheet h3{margin:6px 0 14px;font-size:20px}
 .sheet-grab{width:38px;height:4px;border-radius:99px;background:var(--line);margin:0 auto 12px}
 .scan-actions{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+
+/* --- רישום ידני של אוכל --- */
+.food-list{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
+.food-group{
+  font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.04em;
+  padding:14px 4px 6px;position:sticky;top:0;background:var(--card);
+}
+.food-row{
+  width:100%;display:flex;align-items:center;gap:12px;text-align:right;
+  background:none;border:0;border-bottom:1px solid var(--line);
+  padding:11px 4px;font-family:inherit;color:var(--text);cursor:pointer;min-height:56px;
+}
+.food-row:active{background:var(--bg-2)}
+.food-emoji{
+  font-size:20px;width:38px;height:38px;flex-shrink:0;
+  display:grid;place-items:center;background:var(--bg-2);border-radius:10px;
+}
+.food-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.food-name{font-size:15px;font-weight:600}
+.food-unit{font-size:12.5px;color:var(--muted)}
+.food-cal{font-size:15px;font-weight:700;flex-shrink:0;font-variant-numeric:tabular-nums}
+
+.portion-head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.portion-emoji{
+  font-size:26px;width:52px;height:52px;flex-shrink:0;
+  display:grid;place-items:center;background:var(--bg-2);border-radius:14px;
+}
+.portion-name{font-size:18px;font-weight:700}
 .scan-preview{width:100%;border-radius:16px;margin-bottom:16px;max-height:210px;object-fit:cover}
 .scan-loading{display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px 0;color:var(--muted)}
 .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
@@ -285,6 +313,8 @@ textarea.field{resize:none;line-height:1.5}
   position:fixed;bottom:calc(var(--safe-b) + 96px);inset-inline:0;margin:0 auto;width:max-content;
   max-width:88%;background:var(--text);color:var(--bg);padding:12px 20px;border-radius:999px;
   font-size:14.5px;font-weight:600;z-index:120;animation:fade .2s;
+  /* ההודעה מרחפת מעל הכל — בלי זה היא בולעת נגיעות על מה שמתחתיה */
+  pointer-events:none;
 }
 
 /* ---------- tabbar ---------- */

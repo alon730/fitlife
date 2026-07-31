@@ -11,6 +11,7 @@ const SHELL = [
   './css/style.css',
   './js/store.js',
   './js/calc.js',
+  './js/foods.js',
   './js/ai.js',
   './js/ui.js',
   './js/app.js',

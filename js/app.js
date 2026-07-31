@@ -144,15 +144,150 @@ const App = (() => {
   }
 
   function openScan() {
+    const ai = AI.hasKey();
     $('#scanBody').innerHTML = `
-      <p class="muted small">צלם או בחר תמונה של האוכל, ואני אחשב כמה קלוריות ומה יש בה.</p>
+      <p class="muted small">${ai
+        ? 'צלם את האוכל ואני אחשב כמה קלוריות יש בו, או בחר מהרשימה.'
+        : 'בחר מהרשימה מה אכלת. צילום ארוחה דורש מפתח AI בהגדרות.'}</p>
       <div class="scan-actions">
-        <button class="btn btn-primary btn-lg" id="scanCamera">📷 פתח מצלמה</button>
+        <button class="btn ${ai ? 'btn-primary' : 'btn-ghost'} btn-lg" id="scanCamera">📷 פתח מצלמה${ai ? '' : ' (צריך מפתח)'}</button>
         <button class="btn btn-ghost btn-lg" id="scanGallery">🖼️ בחר מהגלריה</button>
+        <button class="btn ${ai ? 'btn-ghost' : 'btn-primary'} btn-lg" id="scanManual">📝 בחר מרשימת מאכלים</button>
       </div>`;
     $('#scanCamera').onclick  = () => $('#fileCamera').click();
     $('#scanGallery').onclick = () => $('#fileGallery').click();
+    $('#scanManual').onclick  = openManual;
     UI.openSheet('scanSheet');
+  }
+
+  /* ---------- רישום ידני ----------
+     קיים כדי שמעקב הקלוריות יעבוד גם בלי מפתח AI ובלי אינטרנט. */
+  let manualQuery = '';
+
+  function openManual() {
+    $('#scanBody').innerHTML = `
+      <input class="field" id="foodSearch" type="search" placeholder="חפש מאכל..." autocomplete="off" value="${UI.esc(manualQuery)}">
+      <div id="foodList" class="food-list"></div>
+      <button class="btn btn-ghost btn-lg" id="foodCustom" style="margin-top:12px">➕ משהו אחר (הזנה חופשית)</button>
+      <button class="btn btn-ghost btn-lg" id="foodBack" style="margin-top:8px">חזור</button>`;
+
+    const input = $('#foodSearch');
+    input.oninput = () => { manualQuery = input.value; paintFoodList(); };
+    $('#foodCustom').onclick = openCustomFood;
+    $('#foodBack').onclick   = openScan;
+    paintFoodList();
+  }
+
+  function paintFoodList() {
+    const results = Foods.search(manualQuery);
+    const box = $('#foodList');
+    if (!results.length) {
+      box.innerHTML = `<div class="empty">לא מצאתי "${UI.esc(manualQuery)}".<br>אפשר להוסיף אותו בהזנה חופשית.</div>`;
+      return;
+    }
+    /* בלי חיפוש מציגים לפי קטגוריות, עם חיפוש רשימה שטוחה */
+    const rows = (list) => list.map(f => `
+      <button class="food-row" data-food="${UI.esc(f.n)}">
+        <span class="food-emoji">${f.e}</span>
+        <span class="food-main">
+          <span class="food-name">${UI.esc(f.n)}</span>
+          <span class="food-unit">${UI.esc(f.u)}</span>
+        </span>
+        <span class="food-cal">${f.c}</span>
+      </button>`).join('');
+
+    box.innerHTML = manualQuery.trim()
+      ? rows(results)
+      : Foods.GROUPS.map(g => {
+          const list = Foods.byGroup(g);
+          return list.length ? `<div class="food-group">${UI.esc(g)}</div>` + rows(list) : '';
+        }).join('');
+
+    $$('#foodList [data-food]').forEach(b => b.onclick = () => {
+      const food = Foods.DB.find(f => f.n === b.dataset.food);
+      if (food) openPortion(food);
+    });
+  }
+
+  function openPortion(food) {
+    let qty = 1;
+    $('#scanBody').innerHTML = `
+      <div class="portion-head">
+        <span class="portion-emoji">${food.e}</span>
+        <div>
+          <div class="portion-name">${UI.esc(food.n)}</div>
+          <div class="log-sub">ל${UI.esc(food.u)} אחת</div>
+        </div>
+      </div>
+      <label class="lbl">כמה?</label>
+      <div class="chips" id="qtyChips">
+        ${[0.5,1,1.5,2,3].map(q => `<button class="chip${q===1?' on':''}" data-q="${q}">${q === 0.5 ? '½' : (q === 1.5 ? '1½' : q)}</button>`).join('')}
+      </div>
+      <div class="result-grid" id="portionTotals"></div>
+      <div class="ob-actions">
+        <button class="btn btn-ghost" id="portionBack">חזור</button>
+        <button class="btn btn-primary" id="portionAdd">הוסף ליומן</button>
+      </div>`;
+
+    const paint = () => {
+      const m = (v) => Math.round(v * qty);
+      $('#portionTotals').innerHTML = `
+        <div class="result-cell"><b>${m(food.c)}</b><span>קלוריות</span></div>
+        <div class="result-cell"><b>${m(food.p)}</b><span>חלבון ג'</span></div>
+        <div class="result-cell"><b>${m(food.ch)}</b><span>פחמימות ג'</span></div>
+        <div class="result-cell"><b>${m(food.f)}</b><span>שומן ג'</span></div>`;
+    };
+    paint();
+
+    $$('#qtyChips [data-q]').forEach(b => b.onclick = () => {
+      $$('#qtyChips [data-q]').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      qty = parseFloat(b.dataset.q);
+      paint();
+    });
+
+    $('#portionBack').onclick = openManual;
+    $('#portionAdd').onclick = () => {
+      const m = (v) => Math.round(v * qty);
+      const label = qty === 1 ? food.n : `${food.n} (${qty === 0.5 ? '½' : qty} ${food.u})`;
+      Store.addFood({ emoji: food.e, name: label,
+        calories: m(food.c), protein: m(food.p), carbs: m(food.ch), fat: m(food.f) });
+      UI.closeSheets();
+      UI.toast('נוסף ליומן ✓');
+      UI.render(UI.current);
+    };
+  }
+
+  function openCustomFood() {
+    $('#scanBody').innerHTML = `
+      <label class="lbl">מה אכלת?</label>
+      <input class="field" id="cfName" type="text" placeholder="לדוגמה: עוגת יום הולדת">
+      <label class="lbl">קלוריות</label>
+      <input class="field" id="cfCal" type="number" inputmode="numeric" placeholder="250">
+      <p class="muted small">המאקרו לא חובה — אפשר להשאיר ריק.</p>
+      <div class="macro-row">
+        <div class="macro"><div class="macro-lbl">חלבון ג'</div><input class="field" id="cfP" type="number" inputmode="numeric" placeholder="0" style="margin:6px 0 0"></div>
+        <div class="macro"><div class="macro-lbl">פחמימות ג'</div><input class="field" id="cfC" type="number" inputmode="numeric" placeholder="0" style="margin:6px 0 0"></div>
+        <div class="macro"><div class="macro-lbl">שומן ג'</div><input class="field" id="cfF" type="number" inputmode="numeric" placeholder="0" style="margin:6px 0 0"></div>
+      </div>
+      <div class="ob-actions">
+        <button class="btn btn-ghost" id="cfBack">חזור</button>
+        <button class="btn btn-primary" id="cfAdd">הוסף ליומן</button>
+      </div>`;
+
+    $('#cfBack').onclick = openManual;
+    $('#cfAdd').onclick = () => {
+      const name = $('#cfName').value.trim();
+      const cal  = parseFloat($('#cfCal').value);
+      if (!name)            return UI.toast('צריך לכתוב מה אכלת');
+      if (isNaN(cal) || cal < 0) return UI.toast('צריך למלא קלוריות');
+      const num = (sel) => Math.max(0, parseFloat($(sel).value) || 0);
+      Store.addFood({ emoji:'🍽️', name, calories: Math.round(cal),
+        protein: num('#cfP'), carbs: num('#cfC'), fat: num('#cfF') });
+      UI.closeSheets();
+      UI.toast('נוסף ליומן ✓');
+      UI.render(UI.current);
+    };
   }
 
   async function handleImage(file) {
