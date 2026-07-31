@@ -4,7 +4,9 @@ const Store = (() => {
 
   const blank = () => ({
     profile: null,          // {name, age, sex, height, weight, activity, goal, place, days, notes}
-    apiKey: '',
+    provider: 'gemini',     // 'gemini' (חינם) | 'claude' (בתשלום)
+    keys: { gemini: '', claude: '' },
+    geminiModel: null,      // מתגלה אוטומטית בבדיקת חיבור
     days: {},               // 'YYYY-MM-DD' -> {food:[], water:0, burned:0}
     weights: [],            // [{date, kg}]
     workoutPlan: null,      // {generatedAt, days:[...]}
@@ -23,7 +25,21 @@ const Store = (() => {
       console.warn('load failed, starting fresh', e);
       data = blank();
     }
+    migrate();
     return data;
+  }
+
+  /* גרסאות ישנות שמרו מפתח יחיד ב-apiKey, לפני שהיו שני ספקים.
+     מעבירים אותו ל-claude כדי שמי שכבר הזין מפתח לא יאבד אותו. */
+  function migrate() {
+    if (!data.keys) data.keys = { gemini: '', claude: '' };
+    if (data.apiKey) {
+      if (!data.keys.claude) data.keys.claude = data.apiKey;
+      if (!data.provider || data.provider === 'gemini') data.provider = 'claude';
+      delete data.apiKey;
+      save();
+    }
+    if (!data.provider) data.provider = 'gemini';
   }
 
   function save() {

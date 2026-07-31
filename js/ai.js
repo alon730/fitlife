@@ -1,67 +1,216 @@
-/* ===== ai.js — חיבור ל-Claude ===== */
+/* ===== ai.js — מנוע ה-AI =====
+   תומך בשני ספקים. ברירת המחדל היא Gemini, שיש לו מכסה חינמית
+   אמיתית בלי כרטיס אשראי. Claude נשאר כאפשרות למי שיש לו מפתח.
+
+   כל הקוד למעלה בנוי סביב בקשה "ניטרלית" (ראה ask()), וכל ספק
+   מתרגם אותה לפורמט שלו. ככה יש רק עותק אחד של הפרומפטים והסכמות. */
 const AI = (() => {
-  const API = 'https://api.anthropic.com/v1/messages';
-  const MODEL = 'claude-opus-5';
 
-  const hasKey = () => !!(Store.data.apiKey || '').trim();
-
-  /* ---------------------------------------------------------------
-     תעבורה: בתוך אפליקציית אנדרואיד משתמשים ב-CapacitorHttp, שעוקף
-     CORS כי הבקשה יוצאת מהצד הנייטיבי. בדפדפן רגיל נופלים ל-fetch
-     עם ההדר שמאפשר קריאה ישירה מהדפדפן.
-  ---------------------------------------------------------------- */
-  async function call(body) {
-    if (!hasKey()) {
-      const e = new Error('NO_KEY');
-      e.code = 'NO_KEY';
-      throw e;
+  const PROVIDERS = {
+    gemini: {
+      id: 'gemini',
+      label: 'Gemini של גוגל',
+      badge: 'חינם',
+      free: true,
+      hint: 'AIza...',
+      signup: 'https://aistudio.google.com/apikey',
+      note: 'מכסה חינמית יומית. לא צריך כרטיס אשראי.'
+    },
+    claude: {
+      id: 'claude',
+      label: 'Claude של Anthropic',
+      badge: 'בתשלום',
+      free: false,
+      hint: 'sk-ant-...',
+      signup: 'https://console.anthropic.com',
+      note: 'איכות גבוהה יותר. דורש טעינת קרדיט של 5$ לפחות.'
     }
-    const headers = {
-      'content-type': 'application/json',
-      'x-api-key': Store.data.apiKey.trim(),
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    };
+  };
 
-    let status, json;
-    const native = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+  const provider  = () => PROVIDERS[Store.data.provider] ? Store.data.provider : 'gemini';
+  const info      = () => PROVIDERS[provider()];
+  const keyFor    = (p) => ((Store.data.keys || {})[p] || '').trim();
+  const key       = () => keyFor(provider());
+  const hasKey    = () => !!key();
 
-    if (native) {
-      const res = await native.post({ url: API, headers, data: body });
-      status = res.status;
-      json = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-    } else {
-      const res = await fetch(API, { method: 'POST', headers, body: JSON.stringify(body) });
-      status = res.status;
-      json = await res.json().catch(() => ({}));
-    }
-
-    if (status !== 200) {
-      const msg = (json && json.error && json.error.message) || `שגיאה ${status}`;
-      const e = new Error(msg);
-      e.code = status === 401 ? 'BAD_KEY' : status === 429 ? 'RATE' : 'HTTP';
-      e.status = status;
-      throw e;
-    }
-    if (json.stop_reason === 'refusal') {
-      const e = new Error('REFUSAL');
-      e.code = 'REFUSAL';
-      throw e;
-    }
-    return json;
+  function setProvider(p) {
+    if (!PROVIDERS[p]) return;
+    Store.data.provider = p;
+    Store.save();
+  }
+  function setKey(k, p) {
+    p = p || provider();
+    Store.data.keys = Store.data.keys || {};
+    Store.data.keys[p] = (k || '').trim();
+    Store.save();
   }
 
-  const textOf = (json) => {
-    const b = (json.content || []).find(x => x.type === 'text');
-    return b ? b.text : '';
+  /* --------------------------- תעבורה ---------------------------
+     באנדרואיד (Capacitor) יוצאים דרך הצד הנייטיבי, מה שעוקף CORS.
+     בדפדפן — fetch רגיל. */
+  async function http(method, url, headers, body) {
+    const native = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+    if (native) {
+      const res = await native.request({ url, method, headers, data: body });
+      return { status: res.status, json: typeof res.data === 'string' ? safeParse(res.data) : res.data };
+    }
+    const res = await fetch(url, {
+      method, headers, body: body ? JSON.stringify(body) : undefined
+    });
+    return { status: res.status, json: await res.json().catch(() => ({})) };
+  }
+
+  const safeParse = (s) => { try { return JSON.parse(s); } catch (e) { return {}; } };
+
+  const fail = (code, message) => {
+    const e = new Error(message || code);
+    e.code = code;
+    return e;
   };
 
-  const jsonOf = (json) => {
-    try { return JSON.parse(textOf(json)); }
-    catch (e) { const err = new Error('BAD_JSON'); err.code = 'BAD_JSON'; throw err; }
+  /* ======================= GEMINI ======================= */
+  const GEM_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+  /* סכמות כתובות בפורמט של Anthropic. Gemini רוצה טיפוסים באותיות
+     גדולות, ולא מקבל additionalProperties — אז ממירים. */
+  function toGeminiSchema(s) {
+    if (!s || typeof s !== 'object') return s;
+    const out = {};
+    if (s.type)        out.type = String(s.type).toUpperCase();
+    if (s.description) out.description = s.description;
+    if (s.enum)        out.enum = s.enum;
+    if (s.items)       out.items = toGeminiSchema(s.items);
+    if (s.properties) {
+      out.properties = {};
+      Object.keys(s.properties).forEach(k => { out.properties[k] = toGeminiSchema(s.properties[k]); });
+      out.propertyOrdering = Object.keys(s.properties);
+    }
+    if (s.required)    out.required = s.required;
+    return out;
+  }
+
+  /* שמות המודלים משתנים מדי כמה חודשים. במקום לקבע שם אחד שיישבר,
+     שואלים את גוגל מה זמין ובוחרים את הדגם המהיר הכי מתאים. */
+  const GEM_PREFER = [
+    /gemini-3\.5-flash$/, /gemini-3-flash$/, /gemini-2\.5-flash$/,
+    /gemini-.*-flash$/,   /gemini-.*flash.*/, /gemini-/
+  ];
+
+  async function geminiModel() {
+    if (Store.data.geminiModel) return Store.data.geminiModel;
+    const { status, json } = await http('GET', GEM_BASE + '/models?pageSize=200',
+      { 'x-goog-api-key': key() });
+    if (status !== 200) throw httpError(status, json);
+
+    const usable = (json.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
+      .map(m => String(m.name).replace(/^models\//, ''))
+      .filter(n => !/embedding|aqa|imagen|veo|tts|image|audio|native/i.test(n));
+
+    for (const rx of GEM_PREFER) {
+      const hit = usable.find(n => rx.test(n));
+      if (hit) { Store.data.geminiModel = hit; Store.save(); return hit; }
+    }
+    throw fail('NO_MODEL', 'לא נמצא מודל זמין בחשבון הזה.');
+  }
+
+  async function geminiAsk(spec) {
+    const model = await geminiModel();
+    const contents = spec.messages.map(m => {
+      const parts = [];
+      if (m.image) parts.push({ inline_data: { mime_type: m.image.mediaType, data: m.image.base64 } });
+      if (m.text)  parts.push({ text: m.text });
+      return { role: m.role === 'assistant' ? 'model' : 'user', parts };
+    });
+
+    const body = {
+      contents,
+      generationConfig: { maxOutputTokens: spec.maxTokens, temperature: spec.schema ? 0.2 : 0.8 }
+    };
+    if (spec.system) body.system_instruction = { parts: [{ text: spec.system }] };
+    if (spec.schema) {
+      body.generationConfig.responseMimeType = 'application/json';
+      body.generationConfig.responseSchema   = toGeminiSchema(spec.schema);
+    }
+
+    const { status, json } = await http('POST',
+      `${GEM_BASE}/models/${model}:generateContent`,
+      { 'content-type': 'application/json', 'x-goog-api-key': key() }, body);
+
+    if (status !== 200) throw httpError(status, json);
+
+    if (json.promptFeedback && json.promptFeedback.blockReason) throw fail('REFUSAL');
+    const cand = (json.candidates || [])[0];
+    if (!cand) throw fail('REFUSAL');
+    if (/SAFETY|PROHIBITED|BLOCK/i.test(cand.finishReason || '')) throw fail('REFUSAL');
+
+    const text = ((cand.content && cand.content.parts) || [])
+      .map(p => p.text).filter(Boolean).join('').trim();
+    if (!text) throw fail('EMPTY', 'קיבלתי תשובה ריקה. נסה שוב.');
+    return text;
+  }
+
+  /* ======================= CLAUDE ======================= */
+  const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
+  const CLAUDE_MODEL = 'claude-opus-5';
+
+  async function claudeAsk(spec) {
+    const messages = spec.messages.map(m => {
+      if (!m.image) return { role: m.role, content: m.text };
+      return { role: m.role, content: [
+        { type: 'image', source: { type: 'base64', media_type: m.image.mediaType, data: m.image.base64 } },
+        { type: 'text', text: m.text || '' }
+      ]};
+    });
+
+    const body = {
+      model: CLAUDE_MODEL,
+      max_tokens: spec.maxTokens,
+      messages,
+      output_config: { effort: spec.effort || 'medium' }
+    };
+    if (spec.system) body.system = spec.system;
+    if (spec.schema) body.output_config.format = { type: 'json_schema', schema: spec.schema };
+
+    const { status, json } = await http('POST', CLAUDE_URL, {
+      'content-type': 'application/json',
+      'x-api-key': key(),
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    }, body);
+
+    if (status !== 200) throw httpError(status, json);
+    if (json.stop_reason === 'refusal') throw fail('REFUSAL');
+
+    const block = (json.content || []).find(b => b.type === 'text');
+    const text = block ? String(block.text).trim() : '';
+    if (!text) throw fail('EMPTY', 'קיבלתי תשובה ריקה. נסה שוב.');
+    return text;
+  }
+
+  function httpError(status, json) {
+    const msg = (json && json.error && (json.error.message || json.error.status)) || ('שגיאה ' + status);
+    if (status === 401 || status === 403) return fail('BAD_KEY', msg);
+    if (status === 429) return fail('RATE', msg);
+    if (status === 400 && /API key|api_key|API_KEY_INVALID/i.test(msg)) return fail('BAD_KEY', msg);
+    return fail('HTTP', msg);
+  }
+
+  /* ---------------- נקודת הכניסה האחידה ---------------- */
+  async function ask(spec) {
+    if (!hasKey()) throw fail('NO_KEY');
+    return provider() === 'claude' ? claudeAsk(spec) : geminiAsk(spec);
+  }
+
+  const askJson = async (spec) => {
+    const raw = await ask(spec);
+    try {
+      /* מודלים לפעמים עוטפים JSON בגדרות קוד — מנקים לפני הפירוק */
+      return JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, ''));
+    } catch (e) { throw fail('BAD_JSON'); }
   };
 
-  /* --------------------- פרופיל בתוך הפרומפט --------------------- */
+  /* ==================== פרומפטים ==================== */
   function profileBlock() {
     const p = Store.data.profile;
     if (!p) return 'אין עדיין פרופיל.';
@@ -98,7 +247,6 @@ const AI = (() => {
     ].join('\n');
   }
 
-  /* --------------------- הפרומפט הראשי של הצ'אט --------------------- */
   function chatSystem() {
     return [
       'אתה "המאמן" — המאמן האישי שבתוך אפליקציית הכושר והתזונה FitLife. אתה מדבר עברית.',
@@ -130,31 +278,25 @@ const AI = (() => {
     ].join('\n');
   }
 
-  /* היסטוריה מגיעה מבחוץ, כי בזמן הקריאה ההודעה החדשה כבר נכנסה ל-Store
-     ואסור לשלוח אותה פעמיים. */
   function buildHistory(raw) {
     let h = (raw || [])
-      .filter(m => m.role === 'me' || m.role === 'ai')   /* הודעות שגיאה לא חלק מהשיחה */
+      .filter(m => m.role === 'me' || m.role === 'ai')
       .slice(-16)
-      .map(m => ({ role: m.role === 'me' ? 'user' : 'assistant', content: m.text }));
-    /* ה-API דורש שההודעה הראשונה תהיה של המשתמש */
+      .map(m => ({ role: m.role === 'me' ? 'user' : 'assistant', text: m.text }));
     while (h.length && h[0].role === 'assistant') h.shift();
     return h;
   }
 
   async function chat(userText, rawHistory) {
-    const history = buildHistory(rawHistory);
-    const json = await call({
-      model: MODEL,
-      max_tokens: 1200,
+    return ask({
       system: chatSystem(),
-      output_config: { effort: 'low' },
-      messages: [...history, { role: 'user', content: userText }]
+      maxTokens: 1200,
+      effort: 'low',
+      messages: [...buildHistory(rawHistory), { role: 'user', text: userText }]
     });
-    return textOf(json).trim();
   }
 
-  /* --------------------- ניתוח תמונת ארוחה --------------------- */
+  /* ---------------- ניתוח תמונת ארוחה ---------------- */
   const MEAL_SCHEMA = {
     type: 'object',
     properties: {
@@ -201,23 +343,16 @@ const AI = (() => {
       p && +p.age < 18 ? '- המשתמש הוא קטין. אל תכתוב הערות על "יותר מדי קלוריות", דיאטה או משקל. שמור על טון נייטרלי וחיובי לגמרי סביב אוכל.' : ''
     ].filter(Boolean).join('\n');
 
-    const json = await call({
-      model: MODEL,
-      max_tokens: 2000,
+    return askJson({
       system: sys,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: MEAL_SCHEMA } },
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: 'נתח את הארוחה בתמונה.' }
-        ]
-      }]
+      maxTokens: 2000,
+      effort: 'medium',
+      schema: MEAL_SCHEMA,
+      messages: [{ role: 'user', text: 'נתח את הארוחה בתמונה.', image: { base64, mediaType } }]
     });
-    return jsonOf(json);
   }
 
-  /* --------------------- תוכנית אימונים --------------------- */
+  /* ---------------- תוכנית אימונים ---------------- */
   const WORKOUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -277,17 +412,13 @@ const AI = (() => {
       profileBlock()
     ].join('\n');
 
-    const json = await call({
-      model: MODEL,
-      max_tokens: 8000,
-      system: sys,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: WORKOUT_SCHEMA } },
-      messages: [{ role: 'user', content: 'בנה לי תוכנית אימונים שבועית.' }]
+    return askJson({
+      system: sys, maxTokens: 8000, effort: 'medium', schema: WORKOUT_SCHEMA,
+      messages: [{ role: 'user', text: 'בנה לי תוכנית אימונים שבועית.' }]
     });
-    return jsonOf(json);
   }
 
-  /* --------------------- תוכנית תזונה --------------------- */
+  /* ---------------- תוכנית תזונה ---------------- */
   const MEALPLAN_SCHEMA = {
     type: 'object',
     properties: {
@@ -336,36 +467,35 @@ const AI = (() => {
       profileBlock()
     ].filter(Boolean).join('\n');
 
-    const json = await call({
-      model: MODEL,
-      max_tokens: 6000,
-      system: sys,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: MEALPLAN_SCHEMA } },
-      messages: [{ role: 'user', content: 'בנה לי תוכנית תזונה ליום.' }]
+    return askJson({
+      system: sys, maxTokens: 6000, effort: 'medium', schema: MEALPLAN_SCHEMA,
+      messages: [{ role: 'user', text: 'בנה לי תוכנית תזונה ליום.' }]
     });
-    return jsonOf(json);
   }
 
-  /* --------------------- בדיקת מפתח --------------------- */
+  /* ---------------- בדיקת חיבור ---------------- */
   async function testKey() {
-    await call({
-      model: MODEL,
-      max_tokens: 300,
-      output_config: { effort: 'low' },
-      messages: [{ role: 'user', content: 'ענה במילה אחת: אוקיי' }]
+    Store.data.geminiModel = null;      /* מאלץ גילוי מחדש של המודל */
+    Store.save();
+    const reply = await ask({
+      maxTokens: 100, effort: 'low',
+      messages: [{ role: 'user', text: 'ענה במילה אחת בעברית: אוקיי' }]
     });
-    return true;
+    return reply;
   }
 
   function errorText(e) {
+    const p = info();
     switch (e && e.code) {
-      case 'NO_KEY':   return 'צריך להוסיף מפתח API בהגדרות כדי להשתמש ב-AI.';
-      case 'BAD_KEY':  return 'המפתח לא תקין. בדוק אותו בהגדרות.';
-      case 'RATE':     return 'יותר מדי בקשות ברצף. חכה כמה שניות ונסה שוב.';
+      case 'NO_KEY':   return 'צריך להוסיף מפתח בהגדרות כדי להשתמש ב-AI.';
+      case 'BAD_KEY':  return `המפתח של ${p.label} לא תקין. בדוק אותו בהגדרות.`;
+      case 'RATE':     return p.free
+        ? 'הגעת למכסה החינמית לרגע. חכה דקה ונסה שוב.'
+        : 'יותר מדי בקשות ברצף. חכה כמה שניות ונסה שוב.';
       case 'REFUSAL':  return 'לא הצלחתי לענות על זה. נסה לנסח אחרת.';
       case 'BAD_JSON': return 'קיבלתי תשובה לא תקינה. נסה שוב.';
-      /* השרת מחזיר הודעות באנגלית. מציגים הסבר בעברית, ומצרפים את
-         הפירוט הטכני בסוגריים כדי שאפשר יהיה לדעת מה קרה. */
+      case 'EMPTY':    return 'קיבלתי תשובה ריקה. נסה שוב.';
+      case 'NO_MODEL': return 'לא נמצא מודל זמין בחשבון הזה. בדוק שהמפתח נוצר ב-Google AI Studio.';
       default: {
         const detail = e && e.message ? ` (${e.message})` : '';
         return 'משהו השתבש. בדוק שיש אינטרנט ונסה שוב.' + detail;
@@ -373,5 +503,8 @@ const AI = (() => {
     }
   }
 
-  return { hasKey, chat, analyzeMeal, generateWorkoutPlan, generateMealPlan, testKey, errorText };
+  return {
+    PROVIDERS, provider, info, hasKey, keyFor, setProvider, setKey,
+    chat, analyzeMeal, generateWorkoutPlan, generateMealPlan, testKey, errorText
+  };
 })();

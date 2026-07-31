@@ -386,15 +386,37 @@ const UI = (() => {
 
       <div class="card">
         <div class="card-head"><h3>הגדרות AI</h3></div>
-        <p class="muted small">כדי שהמאמן, התוכניות וצילום הארוחות יעבדו, צריך מפתח API של Anthropic.
-        המפתח נשמר רק בטלפון שלך ולא נשלח לשום מקום חוץ מ-Anthropic.</p>
-        <input class="field" id="apiKeyInput" type="password" placeholder="sk-ant-..." value="${esc(Store.data.apiKey)}" autocomplete="off">
+        <p class="muted small">הצ'אט, בניית התוכניות וצילום הארוחות צריכים חיבור לשירות AI.
+        <b>שאר האפליקציה עובדת בלי זה.</b></p>
+
+        <label class="lbl">איזה שירות?</label>
+        <div class="prov-list" id="provList">
+          ${Object.keys(AI.PROVIDERS).map(id => {
+            const pr = AI.PROVIDERS[id];
+            const on = AI.provider() === id;
+            return `<button class="prov${on ? ' on' : ''}" data-prov="${id}">
+              <span class="prov-top">
+                <b>${esc(pr.label)}</b>
+                <span class="prov-badge${pr.free ? ' free' : ''}">${esc(pr.badge)}</span>
+              </span>
+              <span class="prov-note">${esc(pr.note)}</span>
+            </button>`;
+          }).join('')}
+        </div>
+
+        <label class="lbl">המפתח שלך</label>
+        <input class="field" id="apiKeyInput" type="password" placeholder="${esc(AI.info().hint)}"
+               value="${esc(AI.keyFor(AI.provider()))}" autocomplete="off" spellcheck="false">
         <div style="display:flex;gap:10px">
           <button class="btn btn-ghost" id="saveKey" style="flex:1">שמור</button>
           <button class="btn btn-primary" id="testKey" style="flex:1">בדוק חיבור</button>
         </div>
         <p class="small" style="margin:12px 0 0">
           סטטוס: <b>${keyOk ? 'מפתח שמור' : 'אין מפתח'}</b><span class="status-dot${keyOk ? ' ok' : ''}"></span>
+        </p>
+        <p class="muted small" style="margin:10px 0 0">
+          איפה משיגים מפתח: <span class="link" id="openSignup">${esc(AI.info().signup)}</span><br>
+          המפתח נשמר רק בטלפון שלך.
         </p>
       </div>
 
@@ -406,9 +428,18 @@ const UI = (() => {
 
     $$('#profileContent [data-edit]').forEach(b => b.onclick = () => App.editField(b.dataset.edit));
     $('#redoOnboarding').onclick = () => App.startOnboarding(true);
+
+    $$('#provList [data-prov]').forEach(b => b.onclick = () => {
+      /* שומרים את מה שהוקלד לספק הנוכחי לפני שמחליפים,
+         אחרת מפתח שהודבק ולא נשמר נעלם */
+      AI.setKey($('#apiKeyInput').value, AI.provider());
+      AI.setProvider(b.dataset.prov);
+      renderProfile();
+    });
+    $('#openSignup').onclick = () => window.open(AI.info().signup, '_blank');
+
     $('#saveKey').onclick = () => {
-      Store.data.apiKey = $('#apiKeyInput').value.trim();
-      Store.save();
+      AI.setKey($('#apiKeyInput').value);
       toast('המפתח נשמר ✓');
       renderProfile();
     };

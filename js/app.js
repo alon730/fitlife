@@ -480,10 +480,9 @@ const App = (() => {
   }
 
   async function testKey() {
-    const key = $('#apiKeyInput').value.trim();
-    if (!key) return UI.toast('קודם הדבק מפתח');
-    Store.data.apiKey = key;
-    Store.save();
+    const k = $('#apiKeyInput').value.trim();
+    if (!k) return UI.toast('קודם הדבק מפתח');
+    AI.setKey(k);
     const btn = $('#testKey');
     btn.disabled = true;
     btn.textContent = 'בודק...';
